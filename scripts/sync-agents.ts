@@ -4,7 +4,13 @@
  * Run this whenever SOUL.md files change
  */
 
+import { config } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+import { readFileSync, readdirSync } from 'fs';
+import { join } from 'path';
+
+// Load environment variables
+config({ path: join(process.cwd(), '.env.local') });
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
@@ -65,23 +71,48 @@ async function syncAgents() {
       continue;
     }
 
-    // Upsert agent
-    const { error } = await supabase
+    // Check if agent exists
+    const { data: existing } = await supabase
       .from('agents')
-      .upsert({
-        team_id: teamId,
-        name: agent.name,
-        job_title: agent.job_title,
-        model: agent.model,
-        status: agent.status,
-        last_seen: agent.last_seen,
-        metadata: {
-          schedule: agent.schedule,
-          source: 'SOUL.md',
-        },
-      }, {
-        onConflict: 'name',
-      });
+      .select('id')
+      .eq('name', agent.name)
+      .single();
+
+    let error;
+    
+    if (existing) {
+      // Update existing
+      ({ error } = await supabase
+        .from('agents')
+        .update({
+          team_id: teamId,
+          job_title: agent.job_title,
+          model: agent.model,
+          status: agent.status,
+          last_seen: agent.last_seen,
+          metadata: {
+            schedule: agent.schedule,
+            source: 'SOUL.md',
+          },
+        })
+        .eq('name', agent.name));
+    } else {
+      // Insert new
+      ({ error } = await supabase
+        .from('agents')
+        .insert({
+          team_id: teamId,
+          name: agent.name,
+          job_title: agent.job_title,
+          model: agent.model,
+          status: agent.status,
+          last_seen: agent.last_seen,
+          metadata: {
+            schedule: agent.schedule,
+            source: 'SOUL.md',
+          },
+        }));
+    }
 
     if (error) {
       console.error(`❌ Error syncing ${agent.name}:`, error.message);
