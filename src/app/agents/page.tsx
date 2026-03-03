@@ -44,6 +44,8 @@ interface Department {
   name: string;
   description: string;
   color: string;
+  bg: string;
+  gradient: string;
   icon: any;
   teams: Team[];
 }
