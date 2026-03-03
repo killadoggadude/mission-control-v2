@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
-import { RealtimeChannel } from "@supabase/supabase-js";
 import {
   Cpu,
   Circle,
@@ -15,111 +13,85 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
-interface Department {
+interface Agent {
   id: string;
   name: string;
+  title: string;
+  team: string;
+  model: string;
+  schedule: string;
+  status: "active" | "paused" | "error";
   description: string;
-  color: string;
+}
+
+interface Department {
+  name: string;
   teams: Team[];
 }
 
 interface Team {
-  id: string;
   name: string;
-  description: string;
   agents: Agent[];
-}
-
-interface Agent {
-  id: string;
-  name: string;
-  job_title: string;
-  description: string;
-  avatar_url: string | null;
-  model: string | null;
-  status: "active" | "inactive" | "busy" | "error";
-  last_seen: string | null;
-  created_at: string;
 }
 
 const statusColors = {
   active: "bg-emerald-500",
-  inactive: "bg-zinc-400",
-  busy: "bg-amber-500",
+  paused: "bg-amber-500",
   error: "bg-red-500",
 };
 
 const statusIcons = {
   active: CheckCircle2,
-  inactive: Circle,
-  busy: Zap,
+  paused: Circle,
   error: AlertCircle,
 };
+
+// Map teams to departments
+function getDepartment(team: string): string {
+  if (team === "Operations") return "Operations";
+  if (team.includes("Mira") || team === "Content") return "Mira (AI OFM)";
+  if (team === "SaaS Development") return "SaaS Development";
+  if (team.includes("Growth") || team.includes("Intel")) return "Growth & Intel";
+  if (team.includes("Build") || team.includes("Public")) return "Build in Public";
+  if (team === "Leadership") return "Leadership";
+  return "Other";
+}
 
 export default function AgentsPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
 
   useEffect(() => {
     fetchAgents();
-
-    // Subscribe to real-time updates
-    const channel: RealtimeChannel = supabase
-      .channel("agents-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "agents",
-        },
-        () => {
-          fetchAgents();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   async function fetchAgents() {
     try {
-      // Fetch departments with teams and agents
-      const { data: depts, error } = await supabase
-        .from("departments")
-        .select(`
-          *,
-          teams (
-            *,
-            agents (
-              id,
-              name,
-              job_title,
-              description,
-              avatar_url,
-              model,
-              status,
-              last_seen,
-              created_at
-            )
-          )
-        `)
-        .order("name");
-
-      if (error) throw error;
-
-      // Transform data into nested structure
-      const transformed = depts.map((dept: any) => ({
-        ...dept,
-        teams: dept.teams.map((team: any) => ({
-          ...team,
-          agents: team.agents || [],
+      const res = await fetch("/api/agents");
+      const data = await res.json();
+      
+      // Group agents by department → team
+      const grouped: Record<string, Record<string, Agent[]>> = {};
+      
+      data.agents.forEach((agent: Agent) => {
+        const dept = getDepartment(agent.team);
+        const team = agent.team;
+        
+        if (!grouped[dept]) grouped[dept] = {};
+        if (!grouped[dept][team]) grouped[dept][team] = [];
+        
+        grouped[dept][team].push(agent);
+      });
+      
+      // Transform to array structure
+      const transformed = Object.entries(grouped).map(([deptName, teams]) => ({
+        name: deptName,
+        teams: Object.entries(teams).map(([teamName, agents]) => ({
+          name: teamName,
+          agents,
         })),
       }));
-
+      
       setDepartments(transformed);
     } catch (error) {
       console.error("Error fetching agents:", error);
@@ -144,35 +116,29 @@ export default function AgentsPage() {
       <div>
         <h1 className="text-3xl font-bold text-zinc-900">Agent Swarm</h1>
         <p className="text-zinc-500 mt-1">
-          Monitor and manage your AI agent workforce
+          Live view of all agents from SOUL.md files
         </p>
       </div>
 
       {departments.map((dept) => (
-        <div key={dept.id} className="space-y-4">
+        <div key={dept.name} className="space-y-4">
           {/* Department Header */}
-          <div
-            className="flex items-center gap-3 pb-3 border-b-2"
-            style={{ borderColor: dept.color }}
-          >
-            <Layers
-              className="w-6 h-6"
-              style={{ color: dept.color }}
-            />
+          <div className="flex items-center gap-3 pb-3 border-b-2 border-[#5347CE]">
+            <Layers className="w-6 h-6 text-[#5347CE]" />
             <div>
               <h2 className="text-xl font-semibold text-zinc-900">
                 {dept.name}
               </h2>
-              {dept.description && (
-                <p className="text-sm text-zinc-500">{dept.description}</p>
-              )}
+              <p className="text-sm text-zinc-500">
+                {dept.teams.reduce((sum, t) => sum + t.agents.length, 0)} agents
+              </p>
             </div>
           </div>
 
           {/* Teams */}
           <div className="grid gap-6">
             {dept.teams.map((team) => (
-              <div key={team.id} className="bg-white rounded-xl border border-zinc-200 p-5">
+              <div key={team.name} className="bg-white rounded-xl border border-zinc-200 p-5">
                 {/* Team Header */}
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-1">
@@ -181,11 +147,6 @@ export default function AgentsPage() {
                       {team.name}
                     </h3>
                   </div>
-                  {team.description && (
-                    <p className="text-sm text-zinc-500 ml-6">
-                      {team.description}
-                    </p>
-                  )}
                 </div>
 
                 {/* Agents Grid */}
@@ -206,15 +167,7 @@ export default function AgentsPage() {
 
                         {/* Avatar */}
                         <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-[#5347CE] to-purple-600 flex items-center justify-center text-white font-bold text-lg mb-3">
-                          {agent.avatar_url ? (
-                            <img
-                              src={agent.avatar_url}
-                              alt={agent.name}
-                              className="w-full h-full rounded-lg object-cover"
-                            />
-                          ) : (
-                            agent.name.charAt(0)
-                          )}
+                          {agent.name.charAt(0)}
                         </div>
 
                         {/* Agent Info */}
@@ -222,30 +175,22 @@ export default function AgentsPage() {
                           <h4 className="font-semibold text-zinc-900">
                             {agent.name}
                           </h4>
-                          {agent.job_title && (
-                            <p className="text-sm text-zinc-500 mt-0.5">
-                              {agent.job_title}
-                            </p>
-                          )}
-                          {agent.description && (
-                            <p className="text-sm text-zinc-600 mt-2 line-clamp-2">
-                              {agent.description}
-                            </p>
-                          )}
+                          <p className="text-sm text-zinc-500 mt-0.5">
+                            {agent.title}
+                          </p>
+                          <p className="text-sm text-zinc-600 mt-2 line-clamp-2">
+                            {agent.description}
+                          </p>
 
                           {/* Meta */}
                           <div className="flex items-center gap-3 mt-3 pt-3 border-t border-zinc-200">
-                            {agent.model && (
-                              <span className="text-xs text-zinc-400 font-mono">
-                                {agent.model.split("/")[1] || agent.model}
-                              </span>
-                            )}
-                            {agent.last_seen && (
+                            <span className="text-xs text-zinc-400 font-mono">
+                              {agent.model}
+                            </span>
+                            {agent.schedule && (
                               <div className="flex items-center gap-1 text-xs text-zinc-400">
                                 <Clock className="w-3 h-3" />
-                                {formatDistanceToNow(new Date(agent.last_seen), {
-                                  addSuffix: true,
-                                })}
+                                {agent.schedule}
                               </div>
                             )}
                           </div>
@@ -275,7 +220,7 @@ export default function AgentsPage() {
           <Cpu className="w-16 h-16 text-zinc-300 mx-auto mb-4" />
           <p className="text-zinc-500">No agents found</p>
           <p className="text-sm text-zinc-400 mt-1">
-            Run the schema.sql in Supabase to add sample data
+            Make sure agents directory exists in workspace
           </p>
         </div>
       )}
